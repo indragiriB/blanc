@@ -1,10 +1,33 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:device_apps/device_apps.dart';
 
-void main() {
+import 'package:battery_plus/battery_plus.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:installed_apps/app_info.dart';
+import 'package:installed_apps/installed_apps.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.immersiveSticky,
+  );
+
   runApp(const MainApp());
 }
+const List<String> stoicQuotes = [
+  "attention is your most valuable asset",
+  "what you do every day shapes who you become",
+  "focus is a decision",
+  "the obstacle becomes the way",
+  "time is life itself",
+  "simplicity reveals what matters",
+  "discipline creates freedom",
+  "your mind becomes what it consumes",
+  "be present with what is important",
+  "less noise, more purpose",
+];
 
 class MainApp extends StatelessWidget {
   const MainApp({super.key});
@@ -32,11 +55,10 @@ class MainLauncherScreen extends StatefulWidget {
   @override
   State<MainLauncherScreen> createState() => _MainLauncherScreenState();
 }
-
+    
 class _MainLauncherScreenState extends State<MainLauncherScreen> {
-  List<Application> _allApps = [];
-  List<Application> _filteredApps = [];
-  // Menyimpan package name aplikasi favorit (secara default kosong)
+  List<AppInfo> _allApps = [];
+  List<AppInfo> _filteredApps = [];
   final List<String> _favoritePackages = []; 
   
   bool _isDrawerOpen = false;
@@ -50,7 +72,6 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
   void initState() {
     super.initState();
     _now = DateTime.now();
-    // Update jam setiap 1 detik
     _timeTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
         _now = DateTime.now();
@@ -67,20 +88,21 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
   }
 
   Future<void> _loadApps() async {
-    List<Application> apps = await DeviceApps.getInstalledApplications(
-      includeSystemApps: true,
-      onlyAppsWithLaunchIntent: true,
-    );
-    apps.sort((a, b) => a.appName.toLowerCase().compareTo(b.appName.toLowerCase()));
+    // Pada versi 1.2.0, argumen dibaca secara urut (posisional):
+    // Arg 1: excludeSystemApps -> false (agar aplikasi bawaan HP tetap muncul)
+    // Arg 2: withIcon -> false (karena kita murni teks hitam-putih)
+    List<AppInfo> apps = await InstalledApps.getInstalledApps(false, false);
+    
+    // Urutkan aplikasi A-Z
+    apps.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
     setState(() {
       _allApps = apps;
       _filteredApps = apps;
       _isLoading = false;
       
-      // Memberi rekomendasi default jika favorit masih kosong
+      // Memberikan 3 aplikasi pertama sebagai default jika favorit kosong
       if (_favoritePackages.isEmpty && apps.isNotEmpty) {
-        // Mengambil 3 aplikasi pertama sebagai contoh awal
         for (var i = 0; i < (apps.length > 3 ? 3 : apps.length); i++) {
           _favoritePackages.add(apps[i].packageName);
         }
@@ -91,19 +113,17 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
   void _filterApps(String query) {
     setState(() {
       _filteredApps = _allApps
-          .where((app) => app.appName.toLowerCase().contains(query.toLowerCase()))
+          .where((app) => app.name.toLowerCase().contains(query.toLowerCase()))
           .toList();
     });
   }
 
-  // Format Jam manual (HH:mm)
   String _formatTime() {
     String hour = _now.hour.toString().padLeft(2, '0');
     String minute = _now.minute.toString().padLeft(2, '0');
     return "$hour:$minute";
   }
 
-  // Format Tanggal manual (hari, tanggal bulan)
   String _formatDate() {
     List<String> days = ['minggu', 'senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sabtu'];
     List<String> months = ['jan', 'feb', 'mar', 'apr', 'mei', 'jun', 'jul', 'agu', 'sep', 'okt', 'nov', 'des'];
@@ -111,6 +131,20 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
     String dayName = days[_now.weekday % 7];
     String monthName = months[_now.month - 1];
     return "$dayName, ${_now.day} $monthName";
+  }
+
+  // Fungsi utilitas kecil agar aman saat aplikasi gagal dibuka
+  void _openApp(AppInfo app) {
+    try {
+      InstalledApps.startApp(app.packageName);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Tidak dapat membuka ${app.name.toLowerCase()}'), 
+          duration: const Duration(seconds: 1)
+        ),
+      );
+    }
   }
 
   @override
@@ -123,8 +157,7 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
       );
     }
 
-    // Mendapatkan list object aplikasi yang difavoritkan
-    List<Application> favoriteApps = _allApps.where((app) => _favoritePackages.contains(app.packageName)).toList();
+    List<AppInfo> favoriteApps = _allApps.where((app) => _favoritePackages.contains(app.packageName)).toList();
 
     return Scaffold(
       body: SafeArea(
@@ -139,47 +172,42 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
     );
   }
 
-  // 1. HALAMAN UTAMA (HOME)
-  Widget _buildHomeScreen(List<Application> favoriteApps) {
+  Widget _buildHomeScreen(List<AppInfo> favoriteApps) {
     return Column(
       key: const ValueKey('HomeScreen'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 40),
-        // Widget Jam Minimalis
         Text(
           _formatTime(),
           style: const TextStyle(fontSize: 64, fontWeight: FontWeight.w100, letterSpacing: -2),
         ),
-        // Widget Tanggal Minimalis
         Text(
           _formatDate(),
           style: const TextStyle(fontSize: 16, color: Colors.white38, fontWeight: FontWeight.w300),
         ),
         const Spacer(),
-        // Menu Aplikasi Favorit
         const Text('fokus utama:', style: TextStyle(color: Colors.white24, fontSize: 12, letterSpacing: 1.5)),
         const SizedBox(height: 10),
         ...favoriteApps.map((app) => Padding(
               padding: const EdgeInsets.symmetric(vertical: 10.0),
               child: GestureDetector(
-                onTap: () => DeviceApps.openApp(app.packageName),
+                onTap: () => _openApp(app),
                 onLongPress: () {
                   setState(() {
                     _favoritePackages.remove(app.packageName);
                   });
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('${app.appName.toLowerCase()} dihapus dari utama'), duration: const Duration(seconds: 1)),
+                    SnackBar(content: Text('${app.name.toLowerCase()} dihapus dari utama'), duration: const Duration(seconds: 1)),
                   );
                 },
                 child: Text(
-                  app.appName.toLowerCase(),
+                  app.name.toLowerCase(),
                   style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w300, letterSpacing: 1),
                 ),
               ),
             )),
         const Spacer(),
-        // Tombol untuk membuka seluruh aplikasi
         Center(
           child: TextButton(
             onPressed: () {
@@ -197,13 +225,11 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
     );
   }
 
-  // 2. HALAMAN DAFTAR APLIKASI (APP DRAWER)
   Widget _buildAppDrawer() {
     return Column(
       key: const ValueKey('AppDrawer'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Tombol Kembali
         GestureDetector(
           onTap: () {
             setState(() {
@@ -215,7 +241,6 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
           child: const Text('← kembali', style: TextStyle(color: Colors.white38, fontSize: 16)),
         ),
         const SizedBox(height: 24),
-        // Search Bar Text-Only
         TextField(
           controller: _searchController,
           onChanged: _filterApps,
@@ -229,26 +254,22 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        // Hint Informasi
         const Text(
           '*tekan lama untuk menambah/menghapus dari halaman utama',
           style: TextStyle(color: Colors.white24, fontSize: 11, fontStyle: FontStyle.italic),
         ),
         const SizedBox(height: 10),
-        // Daftar Aplikasi Terfilter
         Expanded(
           child: ListView.builder(
             itemCount: _filteredApps.length,
             itemBuilder: (context, index) {
-              Application app = _filteredApps[index];
+              AppInfo app = _filteredApps[index];
               bool isFav = _favoritePackages.contains(app.packageName);
 
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12.0),
                 child: GestureDetector(
-                  onTap: () {
-                    DeviceApps.openApp(app.packageName);
-                  },
+                  onTap: () => _openApp(app),
                   onLongPress: () {
                     setState(() {
                       if (isFav) {
@@ -259,7 +280,7 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
                     });
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text(isFav ? '${app.appName.toLowerCase()} dihapus' : '${app.appName.toLowerCase()} jadi favorit'),
+                        content: Text(isFav ? '${app.name.toLowerCase()} dihapus' : '${app.name.toLowerCase()} jadi favorit'),
                         duration: const Duration(seconds: 1),
                       ),
                     );
@@ -267,12 +288,16 @@ class _MainLauncherScreenState extends State<MainLauncherScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        app.appName.toLowerCase(),
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: isFav ? FontWeight.w500 : FontWeight.w300,
-                          color: isFav ? Colors.white : Colors.white60,
+                      // Membungkus nama aplikasi dengan Flexible agar tidak error jika namanya terlalu panjang
+                      Flexible(
+                        child: Text(
+                          app.name.toLowerCase(),
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: isFav ? FontWeight.w500 : FontWeight.w300,
+                            color: isFav ? Colors.white : Colors.white60,
+                          ),
                         ),
                       ),
                       if (isFav)

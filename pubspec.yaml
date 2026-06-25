@@ -7,7 +7,9 @@ environment:
   sdk: ^3.12.2
 
 dependencies:
-  device_apps: ^2.2.0
+  installed_apps: ^1.2.0
+  shared_preferences: ^2.5.3
+  battery_plus: ^6.2.1
   flutter:
     sdk: flutter
 

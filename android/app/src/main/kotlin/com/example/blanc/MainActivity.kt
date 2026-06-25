@@ -1,4 +1,4 @@
-package com.example.flutter_launcher
+package com.example.blanc
 
 import io.flutter.embedding.android.FlutterActivity
 import android.os.Bundle
